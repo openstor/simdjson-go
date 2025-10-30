@@ -18,7 +18,7 @@ package simdjson
 
 import (
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -322,7 +322,14 @@ func TestNdjsonCountWhere2(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping... too long")
 	}
-	ndjson := loadFile("testdata/RC_2009-01.json.zst")
+
+	// Check if the test file exists, skip if not available
+	filename := "testdata/RC_2009-01.json.zst"
+	if _, err := os.Stat(filename); os.IsNotExist(err) {
+		t.Skipf("Test file %s not available, skipping test", filename)
+	}
+
+	ndjson := loadFile(filename)
 	// Test trimming
 	b := make([]byte, 0, len(ndjson)+4)
 	b = append(b, '\n', '\n')
@@ -365,7 +372,7 @@ func TestNdjsonCountWhere2(t *testing.T) {
 
 func loadFile(filename string) []byte {
 	if !strings.HasSuffix(filename, ".zst") {
-		ndjson, err := ioutil.ReadFile(filename)
+		ndjson, err := os.ReadFile(filename)
 		if err != nil {
 			panic("Failed to load file")
 		}
@@ -381,27 +388,35 @@ func loadFile(filename string) []byte {
 		}
 		if os.IsNotExist(err) {
 			fmt.Println("downloading file", filename)
-			resp, err := http.DefaultClient.Get("https://dl.minio.io/assets/" + filepath.Base(filename))
-			if err == nil && resp.StatusCode == http.StatusOK {
-				b, err := ioutil.ReadAll(resp.Body)
-				if err == nil {
-					err = ioutil.WriteFile(filename, b, os.ModePerm)
-					if err == nil {
-						continue
-					}
-					panic("Failed to write file:" + err.Error())
-				}
+			resp, err := http.DefaultClient.Get("https://github.com/openstor/simdjson-go/releases/download/" + filepath.Base(filename))
+			if err != nil {
+				panic("Failed to download file:" + err.Error())
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusOK {
+				panic(fmt.Sprintf("Failed to download file: HTTP %d", resp.StatusCode))
+			}
+
+			b, err := io.ReadAll(resp.Body)
+			if err != nil {
 				panic("Failed to read file:" + err.Error())
 			}
-			panic("Failed to download file:" + err.Error())
+
+			err = os.WriteFile(filename, b, os.ModePerm)
+			if err != nil {
+				panic("Failed to write file:" + err.Error())
+			}
+			continue
 		}
+		panic("Failed to open file:" + err.Error())
 	}
 	dec, err := zstd.NewReader(f)
 	if err != nil {
 		panic("Failed to create decompressor")
 	}
 	defer dec.Close()
-	ndjson, err := ioutil.ReadAll(dec)
+	ndjson, err := io.ReadAll(dec)
 	if err != nil {
 		panic("Failed to load file")
 	}
